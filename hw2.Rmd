@@ -1,0 +1,434 @@
+---
+title: "hw2"
+author: "Jiajian Huang"
+date: "2/25/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(ISLR)
+library(glmnet)
+library(fields)
+library(rgl)
+library(readbitmap)
+library(imager)
+library(readr)
+library(pander); library(mice); library(Epi)
+library(gridExtra); library(vcd); library(Hmisc)
+library(mosaic); library(forcats); library(tidyverse)
+library(OpenImageR)
+library(class)
+```
+
+
+# HW4
+
+## Q9
+
+### a
+
+```{r}
+set.seed(2019)
+n=nrow(College)
+x=c()
+
+train=sample(1:n,n/2)
+test=-train
+```
+
+### b
+
+```{r}
+lm.q9fit=lm(Apps~.,data=College[train,])
+lm.q9pred=predict(lm.q9fit,newdata = College[test,])
+x=c(x,lm=mean( (lm.q9pred-College[test,"Apps"])^2 ))
+```
+
+### c
+
+```{r}
+grid = 10 ^ seq(4, -2, length=100)
+train.mat = model.matrix(Apps~., data=College[train,])
+test.mat = model.matrix(Apps~., data=College[test,])
+```
+
+```{r}
+ridge.cv=cv.glmnet(x=train.mat,y=College[train,"Apps"],alpha=0,thresh=1e-12,lambda = grid)
+ridge.fit=glmnet(x=train.mat,y=College[train,"Apps"],alpha=0,lambda = ridge.cv$lambda.min)
+ridge.pred=predict(ridge.fit,newx=test.mat )
+ridge.coef=predict(ridge.fit,type='coefficients',s=ridge.cv$lambda.min)
+```
+
+```{r}
+ridge.cv$lambda.min
+ridge.coef
+```
+
+```{r}
+x=c(x,ridge=mean( (ridge.pred-College[test,2])^2))
+```
+
+### d
+
+```{r}
+lasso.cv=cv.glmnet(train.mat,y=College[train,"Apps"],alpha=1,lambda=grid,thresh=1e-12)
+lasso.fit=glmnet(x=as.matrix(College[train,-c(1,2)]),y=College[train,2],alpha=1,lambda = lasso.cv$lambda.min)
+lasso.coef=predict(lasso.fit,type='coefficients',s=lasso.cv$lambda.min)
+
+lasso.cv$lambda.min
+```
+
+```{r}
+lasso.coef
+```
+
+```{r}
+lasso.pred=predict(ridge.fit,newx=test.mat)
+x=c(x,lasso=mean( (lasso.pred-College[test,2])^2))
+```
+
+### e
+
+```{r}
+library(pls)
+set.seed(2019)
+
+pcr.fit=pcr(Apps~.,data=College,scale=TRUE,validation='CV',subset=train)
+validationplot(pcr.fit,val.type="MSEP")
+```
+
+```{r}
+pcr.fit$ncomp
+```
+
+From the plot and the object returned we know that the number of components that achieved the lowest cross validation error is 17. The test error is given below.
+
+```{r}
+pcr.pred=predict(pcr.fit,newdata = College[test,-c(2)],ncomp = 16)
+x=c(x,pcr=mean( (pcr.pred-College[test,2])^2))
+```
+
+### f
+
+```{r}
+pls.fit=plsr(Apps~.,data=College,scale=TRUE,validation='CV',subset=train)
+validationplot(pls.fit,val.type="MSEP")
+```
+
+```{r}
+pls.fit=plsr(Apps~.,data=College,scale=TRUE,validation='CV',subset=train)
+validationplot(pls.fit,val.type="MSEP")
+```
+
+```{r}
+pls.pred=predict(pls.fit,newdata = College[test,-c(2)],ncomp = 10)
+x=c(x,pls=mean( (pls.pred-College[test,2])^2))
+```
+
+### g
+
+```{r}
+sort(x)
+```
+
+
+From the results obtained there is not a significant difference from fitting a model with least squares, ridge, lasso and partial least squares. The lasso and ridge regression significantly penalize the Books, Personal, Terminal and S.F. Ratio predictors. We can see that these are also not found to be significant in the least squares model.
+
+```{r}
+summary(lm.q9fit)
+```
+
+```{r}
+avg_apps=mean(College[,"Apps"])
+1 - mean((College[test, "Apps"] - lm.q9pred)^2) /mean((College[test, "Apps"] - avg_apps)^2)
+```
+
+The best performing model then errors on average 1248924 and 90% of variance present in the data is explained by the model.
+
+
+## Q11
+
+### a 
+
+```{r}
+library(leaps)
+library(MASS)
+library(pls)
+library(dplyr)
+
+data("Boston")
+predict.regsubsets=function(object, newdata, id, ...) {
+    form=as.formula(object$call[[2]])
+    mat=model.matrix(form, newdata)
+    coefi=coef(object, id = id)
+    xvars=names(coefi)
+    mat[, xvars] %*% coefi
+}
+```
+
+```{r}
+k = 10
+folds=sample(1:k, nrow(Boston), replace = TRUE)
+cv.errors=matrix(NA, k, 13, dimnames = list(NULL, paste(1:13)))
+for (j in 1:k) {
+    best.fit=regsubsets(crim ~ ., data = Boston[folds != j, ], nvmax = 13)
+    for (i in 1:13) {
+        pred=predict(best.fit, Boston[folds == j, ], id = i)
+        cv.errors[j, i]=mean((Boston$crim[folds == j] - pred)^2)
+    }
+}
+mean.cv.errors=apply(cv.errors, 2, mean)
+plot(mean.cv.errors, type = "b", xlab = "Number of variables", ylab = "CV error")
+```
+
+Above the picture, we could see that cross-validation selects an 12-variables model.
+
+```{r}
+x = model.matrix(crim ~ ., Boston)[, -1]
+y = Boston$crim
+cv.out = cv.glmnet(x, y, alpha = 1, type.measure = "mse")
+plot(cv.out)
+```
+
+Here cross-validation selects a λ equal to 0.0467489.
+
+Now, we proceed with ridge degression:
+
+```{r}
+cv.out <- cv.glmnet(x, y, alpha = 0, type.measure = "mse")
+plot(cv.out)
+```
+
+The PCR:
+
+```{r}
+pcr.fit <- pcr(crim ~ ., data = Boston, scale = TRUE, validation = "CV")
+summary(pcr.fit)
+```
+
+```{r}
+validationplot(pcr.fit, val.type = "MSEP")
+```
+
+Here cross-validation selects M to be equal to 14.
+
+### b
+
+As computed above the model with the lower cross-validation error is the one chosen by the best subset selection method.
+
+### c
+
+Not all predictors are strongly related tot the response variable; using all of them will decrease performance since it will overfit the model.
+
+
+# HW 5 Chp 7
+
+## Q9
+
+### a
+
+```{r}
+set.seed(2020)
+fit=lm(nox ~ poly(dis, 3), data = Boston)
+summary(fit)
+```
+
+```{r}
+dislims=range(Boston$dis)
+dis.grid=seq(from = dislims[1], to = dislims[2], by = 0.1)
+preds=predict(fit, list(dis = dis.grid))
+plot(nox ~ dis, data = Boston, col = "darkgrey")
+lines(dis.grid, preds, col = "red", lwd = 2)
+```
+
+We could conclude that all polynomial terms are significant.
+
+### b
+
+```{r}
+rss=rep(NA, 10)
+for (i in 1:10) {
+    fit=lm(nox ~ poly(dis, i), data = Boston)
+    rss[i]=sum(fit$residuals^2)
+}
+plot(1:10, rss, xlab = "Degree", ylab = "RSS", type = "l")
+```
+
+It seems that the RSS decreases with the degree of the polynomial, and so is minimum for a polynomial of degree 10.
+
+### c
+
+```{r}
+library(MASS)
+library(boot)
+deltas=rep(NA, 10)
+for (i in 1:10) {
+    fit=glm(nox ~ poly(dis, i), data = Boston)
+    deltas[i]=cv.glm(Boston, fit, K = 10)$delta[1]
+}
+plot(1:10, deltas, xlab = "Degree", ylab = "Test MSE", type = "l")
+```
+
+Above the picture, we could see that a polynomial of degree 4 minimizes the test MSE.
+
+### d
+
+```{r}
+library(splines)
+fit=lm(nox ~ bs(dis, knots = c(4, 7, 11)), data = Boston)
+summary(fit)
+```
+
+```{r}
+pred <- predict(fit, list(dis = dis.grid))
+plot(nox ~ dis, data = Boston, col = "darkgrey")
+lines(dis.grid, preds, col = "red", lwd = 2)
+```
+
+All the term are significant.
+
+### e
+
+```{r}
+rss=rep(NA, 16)
+for (i in 3:16) {
+    fit=lm(nox ~ bs(dis, df = i), data = Boston)
+    rss[i]=sum(fit$residuals^2)
+}
+plot(3:16, rss[-c(1, 2)], xlab = "Degrees of freedom", ylab = "RSS", type = "l")
+```
+
+We could see that RSS decreases until 14.
+
+### f
+
+```{r}
+cv=rep(NA, 16)
+for (i in 3:16) {
+    fit=glm(nox ~ bs(dis, df = i), data = Boston)
+    cv[i]=cv.glm(Boston, fit, K = 10)$delta[1]
+}
+plot(3:16, cv[-c(1, 2)], xlab = "Degrees of freedom", ylab = "Test MSE", type = "l")
+```
+
+Test MSE is minimum for 10 degrees of freedom.
+
+# HW6 Chp 8
+
+## Q9
+
+### a 
+
+```{r}
+set.seed(2022)
+train=sample(1:nrow(OJ),800)
+
+OJ.train=OJ[train,]
+OJ.test=OJ[-train,]
+```
+
+### b
+
+```{r}
+library(tree)
+OJ.tree=tree(Purchase~.,data=OJ.train)
+summary(OJ.tree)
+```
+
+The fitted tree has 8 terminal nodes and a training error rate of 0.173.
+
+### c
+
+```{r}
+OJ.tree
+```
+
+We pick the node labelled 8, which is a terminal node because of the asterisk. The split criterion is LoyalCH < 0.035, the number of observations in that branch is 51 with a deviance of 9.84 and an overall prediction for the branch of MM. 
+
+### d
+
+```{r}
+plot(OJ.tree)
+text(OJ.tree)
+```
+
+We may see that the most important indicator of `Purchase` appears to be `LoyalCH`, since the first branch differentiates the intensity of customer brand loyalty to CH.
+
+### e
+
+```{r}
+library(knitr)
+OJ.pred.train=predict(OJ.tree,OJ.train,type = 'class')
+```
+
+```{r}
+OJ.pred.test=predict(OJ.tree,OJ.test,type = 'class')
+table(OJ.pred.test,OJ.test$Purchase)
+```
+
+```{r}
+table(OJ.pred.test,OJ.test$Purchase)/nrow(OJ.test)
+```
+
+We may conclude that the test error rate is about 31%.
+
+### f
+
+```{r}
+set.seed(2020)
+OJ.tree.cv=cv.tree(OJ.tree,K = 10,FUN = prune.misclass)
+```
+
+### g
+
+```{r}
+plot(OJ.tree.cv$size, OJ.tree.cv$dev, type = "b", xlab = "Tree size", ylab = "Deviance")
+```
+
+### h
+
+
+Above the picture, we could see that the optimal size is 2.
+
+### i
+
+```{r}
+prune.oj=prune.misclass(OJ.tree,best = 2)
+
+plot(prune.oj)
+text(prune.oj, pretty = 0)
+```
+
+### j
+
+```{r}
+summary(prune.oj)
+```
+
+```{r}
+summary(OJ.tree)
+```
+
+The misclassification error rate is slightly higher for the pruned tree (0.1825 vs 0.165).
+
+### k
+
+```{r}
+prune.pred <- predict(prune.oj, OJ.test, type = "class")
+table(prune.pred, OJ.test$Purchase)
+```
+
+```{r}
+table(prune.pred,OJ.test$Purchase)/nrow(OJ.test)
+```
+
+
+In this case, the pruning process increased the test error rate to about 30%, but it produced a way more interpretable tree.
+
+
+
+
+
+
+
+
